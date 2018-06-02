@@ -5,6 +5,8 @@ I do not provide consumer key and secret for authenticating requests, you need t
 
 This library is work in progress, only few endpoints are available now.
 
+You can checkout api documentation in wiki.
+
 ## License
 
 Licensed under either of
