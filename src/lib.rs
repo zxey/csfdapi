@@ -13,7 +13,11 @@ extern crate hyper;
 extern crate serde;
 extern crate serde_json;
 
-pub mod requests;
+mod types;
+
+use types::*;
+
+pub use types::Search;
 
 use select::document::Document;
 use select::predicate::{Predicate, Attr, Class, Name};
@@ -226,84 +230,52 @@ impl<'a> Csfd<'a> {
 
         self.follow_redirect(location, session)?;
 
-        //let location = response.headers().get::<header::Location>().ok_or(err_msg("response does not contain redirect location"))?;
-        //let session_cookie = Csfd::get_phpsessid_cookie_from_set_cookie(&response).ok_or(err_msg("could not get phpsessid set-cookie"))?;
-
-        // let response = self.inner.get(location as &str)
-        //     .header(session_cookie)
-        //     .send()?;
-
-        // let location = response.headers().get::<header::Location>().ok_or(err_msg("response does not contain redirect location"))?;
-        // let session_cookie = Csfd::get_phpsessid_cookie_from_set_cookie(&response).ok_or(err_msg("could not get phpsessid set-cookie"))?;
-
-        // let response = self.inner.get(location as &str)
-        //     .header(session_cookie)
-        //     .send()?;
-
-        // let location = response.headers().get::<header::Location>().ok_or(err_msg("response does not contain redirect location"))?;
-        // let session_cookie = Csfd::get_phpsessid_cookie_from_set_cookie(&response).ok_or(err_msg("could not get phpsessid set-cookie"))?;
-
-        // let response = self.inner.get(location as &str)
-        //     .header(session_cookie)
-        //     .send()?;
-
-        //self.follow_redirect(Some(&header::Location::new("")), Some(header::Cookie::new()));
-
         Ok(())
-        // if let Some(node) = document.find(Attr("id", "frm-authorizeForm")).next() {
-        //     if let Some(action) = node.attr("action") {
-        //         let response = self.inner.post(action)
-        //             .form(&[("username", username), ("password", password)])
-        //             .send()?;
-
-        //         println!("response {:?}", response);
-
-        //         let location = response.headers().get::<header::Location>();
-        //         let set_cookie = response.headers().get::<header::SetCookie>();
-
-        //         if let (Some(location), Some(set_cookie)) = (location, set_cookie) {
-        //             println!("location {:?}", location);
-        //             println!("set_cookie {:?}", set_cookie);
-
-        //             if set_cookie.len() != 1 {
-        //                 panic!("more than one cookie to set");
-        //             }
-
-        //             if let Some(phpsessid) = set_cookie[0].split(";").next() {
-        //                 if let Some(sessionid) = phpsessid.split("=").nth(1) {
-        //                     println!("PHPSESSID {:?}", sessionid);
-
-        //                     let mut cookie = header::Cookie::new();
-        //                     cookie.append("PHPSESSID", String::from(sessionid));
-
-        //                     let response = self.inner.get(location as &str)
-        //                         .header(cookie)
-        //                         .send()?;
-
-        //                     println!("response {:?}", response);
-
-        //                     return Ok(());
-        //                 }
-        //             }
-        //         }
-        //     }
-        // }
-
-        //panic!("invalid form");
     }
 
-
-    pub fn identity(&self) -> requests::IdentityRequest<'a> {
-        requests::IdentityRequest::new(self)
+    pub fn identity(&self) -> Result<serde_json::Value, reqwest::Error> {
+        self.get("identity", None)?.json()
     }
 
-    pub fn home(&self) -> requests::HomeRequest<'a> {
-        requests::HomeRequest::new(self)
+    pub fn home<'g, F>(&self, params: F) -> Result<serde_json::Value, reqwest::Error>
+        where F: for<'f> FnOnce(&'f mut HomeParams<'g>) -> &'f mut HomeParams<'g>
+    {
+        let mut home_params = HomeParams::new();
+        params(&mut home_params);
+        self.get("home", Some(home_params.into()))?.json()
     }
 
     pub fn ad_mob(&self) {
         let text: String = self.get("ad/ad-mob", None).expect("could not get ad-mob").text().unwrap();
         println!("{:?}", text);
+    }
+
+    pub fn search<'g, F>(&self, stype: Option<Search>, params: F) -> Result<serde_json::Value, reqwest::Error> 
+        where F: for<'f> FnOnce(&'f mut SearchParams<'g>) -> &'f mut SearchParams<'g>
+    {
+        let endpoint: Cow<str> = match stype {
+            None => "search".into(),
+            Some(search) => format!("search/{}", search.to_string()).into(),
+        };
+
+        let mut search_params = SearchParams::new();
+        params(&mut search_params);
+
+        self.get(&endpoint, Some(search_params.into()))?.json()
+    }
+
+    pub fn autocomplete<'g, F>(&self, stype: Option<Search>, params: F) -> Result<serde_json::Value, reqwest::Error> 
+        where F: for<'f> FnOnce(&'f mut AutocompleteParams<'g>) -> &'f mut AutocompleteParams<'g>
+    {
+        let endpoint: Cow<str> = match stype {
+            None => "autocomplete/testasd/".into(),
+            Some(search) => format!("autocomplete/{}/", search.to_string()).into(),
+        };
+
+        let mut autocomplete_params = AutocompleteParams::new();
+        params(&mut autocomplete_params);
+
+        self.get(&endpoint, Some(autocomplete_params.into()))?.json()
     }
 }
 
