@@ -138,9 +138,13 @@ impl<'a> Csfd<'a> {
         }
     }
 
-    pub fn get(&self, endpoint: &str, params: Option<HashMap<&'static str, Cow<str>>>) -> Result<reqwest::Response, reqwest::Error> {
+    pub fn get<'b, T>(&self, endpoint: &str, params: Option<T>) -> Result<reqwest::Response, reqwest::Error> 
+        where T: Into<Params<'b>>
+    {
         let endpoint_url = format!("{}/{}", BASE_URL, endpoint);
         let mut request = self.inner.get(&endpoint_url);
+
+        let params = params.map(|p| p.into());
 
         if let Some(ref params) = params {
             request.query(params);
@@ -220,10 +224,12 @@ impl<'a> Csfd<'a> {
 
         let session_cookie = Csfd::get_phpsessid_cookie_from_set_cookie(&response).ok_or(err_msg("could not get phpsessid set-cookie"))?;
 
-        let response = self.inner.post(action)
+        let mut response = self.inner.post(action)
             .form(&[("username", username), ("password", password)])
             .header(session_cookie)
             .send()?;
+
+        println!("response {}", response.text()?);
 
         let location = response.headers().get::<header::Location>();
         let session = Csfd::get_phpsessid_cookie_from_set_cookie(&response);
@@ -234,7 +240,7 @@ impl<'a> Csfd<'a> {
     }
 
     pub fn identity(&self) -> Result<serde_json::Value, reqwest::Error> {
-        self.get("identity", None)?.json()
+        self.get::<NoParams>("identity", None)?.json()
     }
 
     pub fn home<'g, F>(&self, params: F) -> Result<serde_json::Value, reqwest::Error>
@@ -242,11 +248,11 @@ impl<'a> Csfd<'a> {
     {
         let mut home_params = HomeParams::new();
         params(&mut home_params);
-        self.get("home", Some(home_params.into()))?.json()
+        self.get("home", Some(home_params))?.json()
     }
 
     pub fn ad_mob(&self) {
-        let text: String = self.get("ad/ad-mob", None).expect("could not get ad-mob").text().unwrap();
+        let text: String = self.get::<NoParams>("ad/ad-mob", None).expect("could not get ad-mob").text().unwrap();
         println!("{:?}", text);
     }
 
@@ -261,7 +267,7 @@ impl<'a> Csfd<'a> {
         let mut search_params = SearchParams::new();
         params(&mut search_params);
 
-        self.get(&endpoint, Some(search_params.into()))?.json()
+        self.get(&endpoint, Some(search_params))?.json()
     }
 
     pub fn autocomplete<'g, F>(&self, stype: Option<Search>, params: F) -> Result<serde_json::Value, reqwest::Error> 
@@ -275,9 +281,44 @@ impl<'a> Csfd<'a> {
         let mut autocomplete_params = AutocompleteParams::new();
         params(&mut autocomplete_params);
 
-        self.get(&endpoint, Some(autocomplete_params.into()))?.json()
+        self.get(&endpoint, Some(autocomplete_params))?.json()
     }
+
+    pub fn creator(&self, id: u32) -> Result<serde_json::Value, reqwest::Error> {
+        self.get::<NoParams>(&format!("creator/{}", id), None)?.json()
+    }
+
+    pub fn creator_films<'g, F>(&self, id: u32, params: F) -> Result<serde_json::Value, reqwest::Error> 
+        where F: for<'f> FnOnce(&'f mut CreatorParams<'g>) -> &'f mut CreatorParams<'g> 
+    {
+        let mut map = HashMap::new();
+        map.insert("return", "array".into());
+        self.get(&format!("creator/{}/films", id), Some(map))?.json()
+    }
+
+    // pub fn creator_videos<'g, F>(&self, id: u32, params: ParamFn<'g>) -> Result<serde_json::Value, reqwest::Error> 
+    //     //where F: for<'f> FnOnce(&'f mut CreatorParams<'g>) -> &'f mut CreatorParams<'g> 
+    //     //where F: ParamFn<'g>
+    // {
+    //     let mut creator_params = CreatorParams::new();
+    //     params.0(&mut creator_params);
+    //     self.get(&format!("creator/{}/videos", id), Some(creator_params))?.json()
+    // }
+
+    pub fn creator_photos<'g, F>(&self, id: u32, params: F) -> Result<serde_json::Value, reqwest::Error> 
+        where F: for<'f> FnOnce(&'f mut CreatorParams<'g>) -> &'f mut CreatorParams<'g> 
+    {
+        let mut creator_params = CreatorParams::new();
+        params(&mut creator_params);
+        self.get(&format!("creator/{}/photos", id), Some(creator_params))?.json()
+    }
+
+    // pub fn home(data: &str, limit: u32, creator_profile_visits_limit: Option<u32>) -> reqwest::Result<reqwest::Response> {
+
+    // }
 }
+
+type ParamFn<'g> = for<'f> FnOnce(&'f mut CreatorParams<'g>) -> &'f mut CreatorParams<'g>;
 
 #[derive(Debug)]
 struct ApiError {

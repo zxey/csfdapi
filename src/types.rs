@@ -7,6 +7,44 @@ use std::fmt::Display;
 
 pub type Params<'a> = HashMap<&'static str, Cow<'a, str>>;
 
+pub struct NoParams<'a>(Params<'a>);
+
+impl<'a> NoParams<'a> {
+    pub(crate) fn new() -> Self {
+        NoParams(Params::new())
+    }
+}
+
+impl<'a> Into<Params<'a>> for NoParams<'a> {
+    fn into(self) -> Params<'a> {
+        self.0
+    }
+}
+
+pub struct CreatorParams<'a>(Params<'a>);
+
+impl<'a> CreatorParams<'a> {
+    pub(crate) fn new() -> Self {
+        CreatorParams(Params::new())
+    }
+
+    pub fn limit(&mut self, limit: u32) -> &mut Self {
+        self.0.insert("limit", limit.to_string().into());
+        self
+    }
+
+    pub fn offset(&mut self, offset: u32) -> &mut Self {
+        self.0.insert("offset", offset.to_string().into());
+        self
+    }
+}
+
+impl<'a> Into<Params<'a>> for CreatorParams<'a> {
+    fn into(self) -> Params<'a> {
+        self.0
+    }
+}
+
 pub struct SearchParams<'a>(Params<'a>);
 
 impl<'a> SearchParams<'a> {
