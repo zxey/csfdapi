@@ -13,12 +13,6 @@ extern crate hyper;
 extern crate serde;
 extern crate serde_json;
 
-mod types;
-
-use types::*;
-
-pub use types::Search;
-
 use select::document::Document;
 use select::predicate::{Predicate, Attr, Class, Name};
 
@@ -53,6 +47,9 @@ const BASE_URL: &str = "https://android-api.csfd.cz";
 const AUTHORIZE_CALLBACK: &str = "csfdroid://oauth-callback";
 
 header! { (XAppVersion, "X-App-Version") => [String] }
+
+pub type Params<'a> = HashMap<&'static str, Cow<'a, str>>;
+pub type ApiResult = reqwest::Result<reqwest::Response>;
 
 #[derive(Clone, Debug)]
 pub struct Csfd<'a> {
@@ -138,9 +135,7 @@ impl<'a> Csfd<'a> {
         }
     }
 
-    pub fn get<'b, T>(&self, endpoint: &str, params: Option<T>) -> Result<reqwest::Response, reqwest::Error> 
-        where T: Into<Params<'b>>
-    {
+    pub fn get<'b>(&self, endpoint: &str, params: Option<Params<'b>>) -> ApiResult {
         let endpoint_url = format!("{}/{}", BASE_URL, endpoint);
         let mut request = self.inner.get(&endpoint_url);
 
@@ -240,85 +235,135 @@ impl<'a> Csfd<'a> {
     }
 
     pub fn identity(&self) -> Result<serde_json::Value, reqwest::Error> {
-        self.get::<NoParams>("identity", None)?.json()
+        self.get("identity", None)?.json()
     }
 
-    pub fn home<'g, F>(&self, params: F) -> Result<serde_json::Value, reqwest::Error>
-        where F: for<'f> FnOnce(&'f mut HomeParams<'g>) -> &'f mut HomeParams<'g>
-    {
-        let mut home_params = HomeParams::new();
-        params(&mut home_params);
-        self.get("home", Some(home_params))?.json()
+    pub fn home(&self, data: Option<&str>, limit: Option<u32>, creator_profile_visits_limit: Option<u32>) -> ApiResult {
+        let mut params = Params::new();
+
+        if let Some(limit) = limit {
+            params.insert("limit", limit.to_string().into());
+        }
+
+        if let Some(creator_profile_visits_limit) = creator_profile_visits_limit {
+            params.insert("creator_profile_visits_limit", creator_profile_visits_limit.to_string().into());
+        }
+
+        self.get("home", None)
     }
 
-    pub fn ad_mob(&self) {
-        let text: String = self.get::<NoParams>("ad/ad-mob", None).expect("could not get ad-mob").text().unwrap();
-        println!("{:?}", text);
+    pub fn search(&self, q: &str, limit: Option<u32>) -> ApiResult {
+        let mut params = Params::new();
+
+        params.insert("q", q.into());
+
+        if let Some(limit) = limit {
+            params.insert("limit", limit.to_string().into());
+        }
+
+        self.get("search", Some(params))
     }
 
-    pub fn search<'g, F>(&self, stype: Option<Search>, params: F) -> Result<serde_json::Value, reqwest::Error> 
-        where F: for<'f> FnOnce(&'f mut SearchParams<'g>) -> &'f mut SearchParams<'g>
-    {
-        let endpoint: Cow<str> = match stype {
-            None => "search".into(),
-            Some(search) => format!("search/{}", search.to_string()).into(),
-        };
+    pub fn search_users(&self, q: &str, limit: Option<u32>) -> ApiResult {
+        let mut params = Params::new();
 
-        let mut search_params = SearchParams::new();
-        params(&mut search_params);
+        params.insert("q", q.into());
 
-        self.get(&endpoint, Some(search_params))?.json()
+        if let Some(limit) = limit {
+            params.insert("limit", limit.to_string().into());
+        }
+
+        self.get("search/users", Some(params))
     }
 
-    pub fn autocomplete<'g, F>(&self, stype: Option<Search>, params: F) -> Result<serde_json::Value, reqwest::Error> 
-        where F: for<'f> FnOnce(&'f mut AutocompleteParams<'g>) -> &'f mut AutocompleteParams<'g>
-    {
-        let endpoint: Cow<str> = match stype {
-            None => "autocomplete/testasd/".into(),
-            Some(search) => format!("autocomplete/{}/", search.to_string()).into(),
-        };
-
-        let mut autocomplete_params = AutocompleteParams::new();
-        params(&mut autocomplete_params);
-
-        self.get(&endpoint, Some(autocomplete_params))?.json()
+    pub fn creator(&self, creator_id: u32) -> ApiResult {
+        self.get(&format!("creator/{}", creator_id), None)
     }
 
-    pub fn creator(&self, id: u32) -> Result<serde_json::Value, reqwest::Error> {
-        self.get::<NoParams>(&format!("creator/{}", id), None)?.json()
+    pub fn creator_films(&self, creator_id: u32) -> ApiResult {
+        // can this endpoint have offset and limit, just like the other film endpoints?
+        self.get(&format!("creator/{}/films", creator_id), None)
     }
 
-    pub fn creator_films<'g, F>(&self, id: u32, params: F) -> Result<serde_json::Value, reqwest::Error> 
-        where F: for<'f> FnOnce(&'f mut CreatorParams<'g>) -> &'f mut CreatorParams<'g> 
-    {
-        let mut map = HashMap::new();
-        map.insert("return", "array".into());
-        self.get(&format!("creator/{}/films", id), Some(map))?.json()
+    pub fn creator_videos(&self, creator_id: u32, offset: u32, limit: u32) -> ApiResult {
+        let mut params = Params::new();
+
+        params.insert("offset", offset.to_string().into());
+        params.insert("limit", limit.to_string().into());
+
+        self.get(&format!("creator/{}/videos", creator_id), Some(params))
     }
 
-    // pub fn creator_videos<'g, F>(&self, id: u32, params: ParamFn<'g>) -> Result<serde_json::Value, reqwest::Error> 
-    //     //where F: for<'f> FnOnce(&'f mut CreatorParams<'g>) -> &'f mut CreatorParams<'g> 
-    //     //where F: ParamFn<'g>
-    // {
-    //     let mut creator_params = CreatorParams::new();
-    //     params.0(&mut creator_params);
-    //     self.get(&format!("creator/{}/videos", id), Some(creator_params))?.json()
-    // }
+    pub fn creator_photos(&self, creator_id: u32, offset: u32, limit: u32) -> ApiResult {
+        let mut params = Params::new();
 
-    pub fn creator_photos<'g, F>(&self, id: u32, params: F) -> Result<serde_json::Value, reqwest::Error> 
-        where F: for<'f> FnOnce(&'f mut CreatorParams<'g>) -> &'f mut CreatorParams<'g> 
-    {
-        let mut creator_params = CreatorParams::new();
-        params(&mut creator_params);
-        self.get(&format!("creator/{}/photos", id), Some(creator_params))?.json()
+        params.insert("offset", offset.to_string().into());
+        params.insert("limit", limit.to_string().into());
+
+        self.get(&format!("creator/{}/photos", creator_id), Some(params))
     }
 
-    // pub fn home(data: &str, limit: u32, creator_profile_visits_limit: Option<u32>) -> reqwest::Result<reqwest::Response> {
+    pub fn film(&self, film_id: u32) -> ApiResult {
+        self.get(&format!("film/{}", film_id), None)
+    }
 
-    // }
+    pub fn film_photos(&self, film_id: u32, offset: u32, limit: u32, width: u32) -> ApiResult {
+        // TODO: this endpoint should also specifiy 'size' parameter but it is always of value 'all',
+        // we need to figure out what this paramter does
+
+        let mut params = Params::new();
+
+        params.insert("offset", offset.to_string().into());
+        params.insert("limit", limit.to_string().into());
+        params.insert("width", width.to_string().into());
+
+        //params.insert("size", "all".into()); // TODO: what this does?
+
+        self.get(&format!("film/{}/photos", film_id), Some(params))
+    }
+
+    pub fn film_videos(&self, film_id: u32, offset: u32, limit: u32, width: u32) -> ApiResult {
+        // TODO: this one does not have 'size' parameter, but can we use it
+
+        let mut params = Params::new();
+
+        params.insert("offset", offset.to_string().into());
+        params.insert("limit", limit.to_string().into());
+        params.insert("width", width.to_string().into());
+
+        self.get(&format!("film/{}/videos", film_id), Some(params))
+    }
+
+    pub fn film_comments(&self, film_id: u32, offset: u32, limit: u32) -> ApiResult {
+        let mut params = Params::new();
+
+        params.insert("offset", offset.to_string().into());
+        params.insert("limit", limit.to_string().into());
+
+        self.get(&format!("film/{}/comments", film_id), Some(params))
+    }
+
+    pub fn film_trivia(&self, film_id: u32, offset: u32, limit: u32) -> ApiResult {
+        let mut params = Params::new();
+
+        params.insert("offset", offset.to_string().into());
+        params.insert("limit", limit.to_string().into());
+
+        self.get(&format!("film/{}/trivia", film_id), Some(params))
+    }
+
+    pub fn film_creators(&self, film_id: u32) -> ApiResult {
+        self.get(&format!("film/{}/creators", film_id), None)
+    }
+
+    pub fn film_my_rating(&self, film_id: u32) -> ApiResult {
+        self.get(&format!("film/{}/my-rating", film_id), None)
+    }
+
+    pub fn film_my_comment(&self, film_id: u32) -> ApiResult {
+        self.get(&format!("film/{}/my-comment", film_id), None)
+    }
 }
-
-type ParamFn<'g> = for<'f> FnOnce(&'f mut CreatorParams<'g>) -> &'f mut CreatorParams<'g>;
 
 #[derive(Debug)]
 struct ApiError {
